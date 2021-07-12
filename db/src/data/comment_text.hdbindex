@@ -1,0 +1,2 @@
+INDEX "COMMENT_TEXT" on "PERFORMANCE"("FEEDBACK_COMMENT")
+--虽然报错,但是索引建立成功
