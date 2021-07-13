@@ -1,0 +1,384 @@
+-- 获取当前登录用户的用户名和SCHEMA
+SELECT SESSION_USER, CURRENT_SCHEMA FROM DUMMY; 
+--		系统ID		数据库名称	主机地址 版本：major.minor.patch.build	数据库使用类型。推荐值：生产、测试​​、开发、定制。允许使用任何值，但客户端可以使用推荐值来改变行为。
+SELECT SYSTEM_ID, DATABASE_NAME, HOST, VERSION, USAGE FROM M_DATABASE;
+
+---
+
+--创建一个用户名是devuser,密码是Password1
+	--NO FORCE_FIRST_PASSWORD_CHANGE 不强制首次修改密码
+		--SET USERGROUP DEFAULT将用户放置到默认的组中
+CREATE USER devuser PASSWORD Password1 NO FORCE_FIRST_PASSWORD_CHANGE SET USERGROUP DEFAULT;
+--赋予用户"目录读取"目录的权限  
+GRANT CATALOG READ TO devuser WITH ADMIN OPTION;
+--赋予用户"创建SCHEMA"的权限  
+GRANT CREATE SCHEMA TO devuser WITH ADMIN OPTION;
+--赋予用户HANA系统管理员角色
+GRANT HANA_SYSRDL#CG_ADMIN_ROLE TO devuser;
+
+CREATE USER enduser PASSWORD Password1 NO FORCE_FIRST_PASSWORD_CHANGE SET USERGROUP DEFAULT;
+
+---
+
+--创建一个SYSRDL#CG远程执行的"存储过程"
+CALL SYSRDL#CG.REMOTE_EXECUTE ('
+BEGIN
+--创建几个序列表
+    CREATE TABLE city ( 
+        zip VARCHAR(5) PRIMARY KEY,
+        name VARCHAR(30) NOT NULL,
+        state VARCHAR(2) NOT NULL
+    );
+
+    CREATE TABLE hotel (
+        hno INTEGER PRIMARY KEY,
+        name VARCHAR(50) NOT NULL,
+        zip VARCHAR(5),
+        address VARCHAR(40) NOT NULL
+    );
+
+    INSERT INTO city VALUES (''60601'', ''Chicago'', ''IL'');
+    INSERT INTO city VALUES (''75243'', ''Dallas'', ''TX'');
+    INSERT INTO city VALUES (''32018'', ''Daytona Beach'', ''FL'');
+    INSERT INTO city VALUES (''48226'', ''Detroit'', ''MI'');
+    INSERT INTO city VALUES (''90029'', ''Hollywood'', ''CA'');
+    INSERT INTO city VALUES (''90804'', ''Long Beach'', ''CA'');
+    INSERT INTO city VALUES (''11788'', ''Long Island'', ''NY'');
+    INSERT INTO city VALUES (''90018'', ''Los Angeles'', ''CA'');
+    INSERT INTO city VALUES (''70112'', ''New Orleans'', ''LA'');
+
+    INSERT INTO hotel VALUES (10, ''Long Island'', ''11788'', ''1499 Grove Street'');
+    INSERT INTO hotel VALUES (30, ''Lake Michigan'', ''60601'', ''354 Oak Terrace'');
+    INSERT INTO hotel VALUES (100, ''Beachside'', ''32018'', ''1980 34th St.'');
+    INSERT INTO hotel VALUES (110, ''Atlantic'', ''33441'', ''111 78th St.'');
+    INSERT INTO hotel VALUES (120, ''Calypso'', ''90804'', ''35 Broadway'');
+    INSERT INTO hotel VALUES (130, ''Evening Star'', ''90029'', ''13 Beechwood Place'');
+    INSERT INTO hotel VALUES (140, ''Steamboat Louis Armstrong'', ''70112'', ''788 Main St.'');
+
+END');
+
+---
+
+CREATE SCHEMA travel;
+
+--创建一个列存储的表
+CREATE COLUMN TABLE travel.room (
+  hno INTEGER,
+  type CHAR(6),
+  free INTEGER,
+  price NUMERIC(6, 2),
+--联合主键
+  PRIMARY KEY (hno, type)
+);
+
+INSERT INTO travel.room VALUES (10, 'single', 20, 135.00);
+INSERT INTO travel.room VALUES (10, 'double', 45, 200.00);
+INSERT INTO travel.room VALUES (30, 'single', 12, 45.00);
+INSERT INTO travel.room VALUES (30, 'double', 15, 80.00);
+INSERT INTO travel.room VALUES (100, 'single', 11, 60.00);
+INSERT INTO travel.room VALUES (100, 'double', 24, 100.00);
+INSERT INTO travel.room VALUES (110, 'single', 2, 70.00);
+INSERT INTO travel.room VALUES (110, 'double', 10, 130.00);
+INSERT INTO travel.room VALUES (120, 'single', 34, 80.00);
+INSERT INTO travel.room VALUES (120, 'double', 78, 140.00);
+INSERT INTO travel.room VALUES (120, 'suite', 55, 350.00);
+INSERT INTO travel.room VALUES (130, 'single', 89, 100.00);
+INSERT INTO travel.room VALUES (130, 'double', 300, 270.00);
+INSERT INTO travel.room VALUES (130, 'suite', 100, 700.00);
+INSERT INTO travel.room VALUES (140, 'single', 10, 99.00);
+INSERT INTO travel.room VALUES (140, 'double', 9, 149.00);
+INSERT INTO travel.room VALUES (140, 'suite', 78, 499.00);
+
+---
+
+--在travel SCHEMA下创建一个视图(budgetrooms)
+		--提供数据源的事travel.room(SCHEMA下room表),内连接travel."v_hotel"(创建的虚拟表要使用双引号包裹)和travel."v_city"
+
+CREATE VIEW travel.budgetrooms AS 
+    SELECT c."state", c."name" AS city, h."name" AS hotel, r.type, r.free, r.price
+      FROM travel.room r
+      INNER JOIN travel."v_hotel" h ON h."hno" = r.hno
+      INNER JOIN travel."v_city" c ON c."zip" = h."zip"
+      WHERE r.price <= 100
+    ;
+--查询这个视图的所有数据
+SELECT * FROM travel.budgetrooms;
+--授予enduser查询travel SCHEMA的权限
+GRANT SELECT ON SCHEMA travel TO enduser;
+
+---
+
+npm install async-waterfall
+npm config set @sap:registry https://npm.sap.com
+npm install @sap/hana-client
+node query.js
+
+---
+
+pip install hdbcli
+python query.py
+
+---
+
+java -jar ngdbc.jar -u <user>,<password> -n <endpoint> -o encrypt=true -c "SELECT * FROM travel.budgetrooms";
+
+javac query.java
+
+Windows:
+java -classpath "<path>\ngdbc.jar;." query
+
+Linux/MacOS:
+java -classpath "<path>\ngdbc.jar:." query
+
+---
+
+hdbsql -u <user> -p <password> -n <endpoint> -ssltrustcert -e "SELECT * FROM travel.budgetrooms"
+
+---
+
+COLUMN TABLE "travel.db::room" 
+    (
+        "hno" INTEGER, 
+        "type" VARCHAR(10),
+        "free" INTEGER, 
+        "price" DOUBLE, 
+        PRIMARY KEY ("hno", "type") 
+    )
+
+---
+
+INSERT INTO "travel.db::room" VALUES (10, 'single', 20, 135.00);
+INSERT INTO "travel.db::room" VALUES (10, 'double', 45, 200.00);
+INSERT INTO "travel.db::room" VALUES (30, 'single', 12, 45.00);
+INSERT INTO "travel.db::room" VALUES (30, 'double', 15, 80.00);
+INSERT INTO "travel.db::room" VALUES (100, 'single', 11, 60.00);
+INSERT INTO "travel.db::room" VALUES (100, 'double', 24, 100.00);
+INSERT INTO "travel.db::room" VALUES (110, 'single', 2, 70.00);
+INSERT INTO "travel.db::room" VALUES (110, 'double', 10, 130.00);
+INSERT INTO "travel.db::room" VALUES (120, 'single', 34, 80.00);
+INSERT INTO "travel.db::room" VALUES (120, 'double', 78, 140.00);
+INSERT INTO "travel.db::room" VALUES (120, 'suite', 55, 350.00);
+INSERT INTO "travel.db::room" VALUES (130, 'single', 89, 100.00);
+INSERT INTO "travel.db::room" VALUES (130, 'double', 300, 270.00);
+INSERT INTO "travel.db::room" VALUES (130, 'suite', 100, 700.00);
+INSERT INTO "travel.db::room" VALUES (140, 'single', 10, 99.00);
+INSERT INTO "travel.db::room" VALUES (140, 'double', 9, 149.00);
+INSERT INTO "travel.db::room" VALUES (140, 'suite', 78, 499.00);
+
+---
+
+CREATE USER travel_grantor PASSWORD <password> NO FORCE_FIRST_PASSWORD_CHANGE SET USERGROUP DEFAULT;
+CREATE ROLE "travel::external_access_g";
+CREATE ROLE "travel::external_access";
+GRANT "travel::external_access_g", "travel::external_access" TO travel_grantor WITH ADMIN OPTION;
+
+GRANT SELECT, SELECT METADATA ON SCHEMA travel TO "travel::external_access_g" WITH GRANT OPTION;
+GRANT SELECT, SELECT METADATA ON SCHEMA travel TO "travel::external_access";
+
+---
+
+{
+  "user": "travel_grantor",
+  "password": "<password>",
+  "schema": "TRAVEL",
+  "tags": ["hana"]
+}
+
+---
+
+modules:
+ - name: db
+   type: hdb
+   path: db
+   requires:
+    - name: travel-hdi
+      properties:
+        TARGET_CONTAINER: '~{hdi-container-name}'
+    - name: travel-schema
+ 
+resources:
+ - name: travel-hdi
+   properties:
+      hdi-container-name: ${service-name}
+   type: com.sap.xs.hdi-container
+ - name: travel-schema
+   type: org.cloudfoundry.existing-service
+   parameters:
+     service-name: travel-schema
+
+---
+
+travel.hdbgrants:
+{
+    "travel-schema": {
+        "object_owner": {
+            "roles": [
+                "travel::external_access_g"
+            ]
+        },
+        "application_user": {
+            "roles": [
+                "travel::external_access"
+            ]
+        }
+    }
+}
+
+travel.hdbsynonym:
+{
+    "travel.db::ROOM": {
+        "target": {
+            "object": "ROOM",
+            "schema": "TRAVEL"
+        }
+    },
+    "travel.db::v_city": {
+        "target": {
+            "object": "v_city",
+            "schema": "TRAVEL"
+        }
+    },
+    "travel.db::v_hotel": {
+        "target": {
+            "object": "v_hotel",
+            "schema": "TRAVEL"
+        }
+    }
+}
+
+analytics.hdbrole:
+{
+    "role": {
+        "name": "travel.db::analytics",
+        "schema_privileges": [
+            {
+                "privileges": [
+                    "SELECT"
+                ]
+            }
+        ]
+    }
+}
+
+---
+
+npm install -g generator-saphanaacademy-haa
+
+---
+
+/sap/bc/ina/service/v2/HeartBeat
+/sap/bc/ina/service/v2/GetServerInfo
+
+---
+
+SELECT * FROM CERTIFICATES;
+SELECT * FROM JWT_PROVIDERS;
+SELECT * FROM PSE_CERTIFICATES;
+SELECT * FROM PSES WHERE PURPOSE = 'JWT';
+
+CREATE CERTIFICATE FROM '<certificate>';
+
+CREATE JWT PROVIDER JWTPROVIDER1 WITH ISSUER '<issuer>' CLAIM 'user_name' AS EXTERNAL IDENTITY CASE SENSITIVE IDENTITY;
+
+CREATE PSE PSE1;
+ALTER PSE PSE1 ADD CERTIFICATE <certificate_id>;
+SET PSE PSE1 PURPOSE JWT FOR PROVIDER JWTPROVIDER1;
+
+---
+
+CREATE USER myuser PASSWORD <password> NO FORCE_FIRST_PASSWORD_CHANGE SET USERGROUP DEFAULT;
+GRANT EXECUTE ON SYS.EXECUTE_MDS_DEV TO myuser;
+ALTER USER myuser ENABLE JWT;
+ALTER USER myuser ADD IDENTITY '<email>' FOR JWT PROVIDER JWTPROVIDER1;
+GRANT "<hdi-schema>::external_privileges_role" TO myuser;
+--GRANT "<hdi-schema>::access_role" TO myuser;
+GRANT "<hdi-schema>"."travel.db::analytics" TO myuser;
+
+---
+
+CREATE COLUMN TABLE travel.customer (
+  id INTEGER,
+  customer VARCHAR(20),
+  cc VARCHAR(20),
+  ssn VARCHAR(20),
+  PRIMARY KEY (id)
+  )
+ WITH MASK (cc USING '####-####-####-####')
+ ;
+
+INSERT INTO travel.customer VALUES (1, 'Jamie',  '1234-5678-9012-3456', '123-00-4567');
+INSERT INTO travel.customer VALUES (2, 'Julie',  '2222-2222-2222-2222', '222-00-2222');
+INSERT INTO travel.customer VALUES (3, 'Bob',    '3333-3333-3333-3333', '333-00-3333');
+INSERT INTO travel.customer VALUES (4, 'Denys',  '4444-4444-4444-4444', '444-00-4444');
+INSERT INTO travel.customer VALUES (5, 'Philip', '5555-5555-5555-5555', '555-00-5555');
+INSERT INTO travel.customer VALUES (6, 'Joe',    '6666-6666-6666-6666', '666-00-6666');
+
+SELECT * FROM travel.customer;
+
+ALTER TABLE travel.customer
+ ADD MASK (ssn USING '###-##-##' || RIGHT(ssn,2))
+ ;
+
+CREATE FUNCTION travel.maskcc (input VARCHAR(20)) RETURNS output VARCHAR(20) LANGUAGE SQLSCRIPT AS
+BEGIN
+  output = LEFT(:input,2) || '##-####-####-#' || RIGHT(:input,3);
+END;
+
+ALTER TABLE travel.customer
+ ALTER MASK (cc USING travel.maskcc(cc))
+ ;
+
+SELECT *
+  FROM EFFECTIVE_MASK_EXPRESSIONS
+  WHERE     ROOT_SCHEMA_NAME = 'TRAVEL' 
+        AND ROOT_OBJECT_NAME = 'CUSTOMER'
+        AND ROOT_COLUMN_NAME IN ('CC','SSN')
+        AND        USER_NAME = 'ENDUSER'
+ ;
+
+GRANT UNMASKED ON SCHEMA travel TO enduser;
+
+---
+
+COLUMN TABLE "travel.db::customer" (
+  "id" INTEGER,
+  "customer" VARCHAR(20),
+  "cc" VARCHAR(20),
+  "ssn" VARCHAR(20),
+  "nights" INTEGER,
+  PRIMARY KEY ("id")
+  )
+
+INSERT INTO "travel.db::customer" VALUES (1, 'Jamie',  '1234-5678-9012-3456', '123-00-4567', 2);
+INSERT INTO "travel.db::customer" VALUES (2, 'Julie',  '2222-2222-2222-2222', '222-00-2222', 3);
+INSERT INTO "travel.db::customer" VALUES (3, 'Bob',    '3333-3333-3333-3333', '333-00-3333', 8);
+INSERT INTO "travel.db::customer" VALUES (4, 'Denys',  '4444-4444-4444-4444', '444-00-4444', 4);
+INSERT INTO "travel.db::customer" VALUES (5, 'Philip', '5555-5555-5555-5555', '555-00-5555', 1);
+INSERT INTO "travel.db::customer" VALUES (6, 'Joe',    '6666-6666-6666-6666', '666-00-6666', 7);
+
+CONCAT('####-####-####-#',RIGHT("cc",3))
+CONCAT('###-##-##',RIGHT("ssn",2))
+
+---
+
+SELECT * FROM CERTIFICATES;
+SELECT * FROM JWT_PROVIDERS;
+SELECT * FROM PSE_CERTIFICATES;
+SELECT * FROM PSES WHERE PURPOSE = 'SAML';
+
+CREATE CERTIFICATE FROM '<certificate>';
+
+CREATE JWT PROVIDER JWTPROVIDER1 WITH ISSUER '<issuer>' CLAIM 'user_name' AS EXTERNAL IDENTITY CASE SENSITIVE IDENTITY;
+
+CREATE SAML PROVIDER SAMLPROVIDER1 WITH SUBJECT '<subject_distinguished_name>' ISSUER '<issuer_distinguished_name>' ENTITY ID '<entity_id>' CASE SENSITIVE IDENTITY;
+
+CREATE PSE PSE1;
+ALTER PSE PSE1 ADD CERTIFICATE <certificate_id>;
+SET PSE PSE1 PURPOSE SAML FOR PROVIDER SAMLPROVIDER1;
+
+---
+
+CREATE USER myuser;
+ALTER USER myuser ENABLE SAML;
+ALTER USER myuser ADD IDENTITY '<email>' FOR SAML PROVIDER SAMLPROVIDER1;
+GRANT "<hdi-schema>"."travel.db::analytics" TO myuser;
